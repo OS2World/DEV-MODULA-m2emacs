@@ -1,0 +1,2272 @@
+;;; Modula2.el --- Modula-2 editing support package
+
+;; Authors: Michael Schmidt <michael@pbinfo.UUCP> 
+;;	    Tom Perrine     <Perrin@LOGICON.ARPA>
+;;          Egor Ziryanov   <ego@iis.nsk.su>
+;; Keywords: languages
+
+;; The authors distributed this without a copyright notice
+;; back in 1988, so it is in the public domain.  The original included
+;; the following credit:
+
+;; Author Mick Jordan
+;; amended Peter Robinson
+
+;; $RCSfile: modula2.el,v $ $Revision: 1.3 $ $Date: 1997/05/26 14:28:27 $
+
+;;; Commentary:
+
+;; A major mode for editing Modula-2 code.  It provides convenient abbrevs
+;; for Modula-2 keywords, knows about the standard layout rules, and supports
+;; a native compile command.
+
+;; ==========================
+;; How to install it into ~/.emacs
+
+;(or (assoc "\\.ob2$" auto-mode-alist)                                     
+;     (setq auto-mode-alist (cons '("\\.ob2$" . modula-2-mode)
+;                               auto-mode-alist)))                           
+;
+;(or (assoc "\\.mod$" auto-mode-alist)                                     
+;     (setq auto-mode-alist (cons '("\\.mod$" . modula-2-mode)
+;                               auto-mode-alist)))
+;
+;(or (assoc "\\.def$" auto-mode-alist)                                     
+;     (setq auto-mode-alist (cons '("\\.def$" . modula-2-mode)
+;                               auto-mode-alist)))                           
+
+;;===================
+
+;;; Code:
+
+;;; Added by Tom Perrine (TEP)
+(defvar m2-mode-syntax-table nil
+  "Syntax table in use in Modula-2 buffers.")
+
+(defvar m2-compile-command "xc =m"
+  "Command to compile Modula-2 programs")
+
+(defvar m2-build-command "xc =p"
+  "Command to link Modula-2 programs")
+
+(defvar m2-project-name nil
+  "Name of the executable.")
+
+(defvar m2-imenu-generic-expression
+  '("^[ \t]*\\(PROCEDURE\\)[ \t\n]+\\([a-zA-Z0-9_.:]+\\)" . (2))
+  "Imenu expression for M2-mode.  See `imenu-generic-expression'.")
+  
+(defvar m2-mode-syntax-table nil
+  "Syntax table in use in m2-mode buffers.")
+
+(if m2-mode-syntax-table
+    ()
+  (setq m2-mode-syntax-table (make-syntax-table))
+  (modify-syntax-entry ?\\ "."   m2-mode-syntax-table)
+  (modify-syntax-entry ?( "()1"  m2-mode-syntax-table)  
+  (modify-syntax-entry ?) ")(4"  m2-mode-syntax-table)
+  (modify-syntax-entry ?* ". 23" m2-mode-syntax-table)
+  (modify-syntax-entry ?{ "<"    m2-mode-syntax-table)
+  (modify-syntax-entry ?} ">"    m2-mode-syntax-table)
+  (modify-syntax-entry ?+ "."    m2-mode-syntax-table)
+  (modify-syntax-entry ?- "."    m2-mode-syntax-table)
+  (modify-syntax-entry ?= "."    m2-mode-syntax-table)
+  (modify-syntax-entry ?% "."    m2-mode-syntax-table)
+  (modify-syntax-entry ?< "."    m2-mode-syntax-table)
+  (modify-syntax-entry ?> "."    m2-mode-syntax-table)
+  (modify-syntax-entry ?& "."    m2-mode-syntax-table)
+  (modify-syntax-entry ?| "."    m2-mode-syntax-table)
+  (modify-syntax-entry ?_ "w"    m2-mode-syntax-table)
+  (modify-syntax-entry ?. "w"    m2-mode-syntax-table)
+  (modify-syntax-entry ?\' "\""  m2-mode-syntax-table))
+
+;;; Added by TEP
+(defvar m2-mode-map nil
+  "Keymap used in Modula-2 mode.")
+
+(if m2-mode-map ()
+  (let ((map (make-sparse-keymap)))
+    (define-key map "\t" 'm2-tab)
+    (define-key map "\C-cb" 'm2-begin)
+    (define-key map "\C-cc" 'm2-case)
+    (define-key map "\C-cd" 'm2-definition)
+    (define-key map "\C-ce" 'm2-else)
+    (define-key map "\C-cf" 'm2-for)
+    (define-key map "\C-ch" 'm2-header)
+    (define-key map "\C-ci" 'm2-if)
+    (define-key map "\C-cm" 'm2-module)
+    (define-key map "\C-cl" 'm2-loop)
+    (define-key map "\C-co" 'm2-or)
+    (define-key map "\C-cp" 'm2-procedure)
+    (define-key map "\C-c\C-w" 'm2-with)
+    (define-key map "\C-cr" 'm2-record)
+    (define-key map "\C-ct" 'm2-type)
+    (define-key map "\C-cu" 'm2-until)
+    (define-key map "\C-cv" 'm2-var)
+    (define-key map "\C-cw" 'm2-while)
+    (define-key map "\C-cx" 'm2-export)
+    (define-key map "\C-cy" 'm2-import)
+    (define-key map "\C-c{" 'm2-begin-comment)
+    (define-key map "\C-c}" 'm2-end-comment)
+    (define-key map "\C-m"  'm2-newline)
+    (define-key map "\C-c\C-z" 'suspend-emacs)
+    (define-key map "\C-c\C-v" 'm2-visit)
+    (define-key map "\C-c\C-t" 'm2-toggle)
+    (define-key map "\C-c\C-b" 'm2-build)
+    (define-key map "\C-c\C-c" 'm2-compile)
+    (define-key map "\177"     'backward-delete-char-untabify)
+    (setq m2-mode-map map)))
+
+(defvar m2-font-lock-keywords
+  (list
+   '("^[ \t]*\\(PROCEDURE\\|RETURN\\)\\>[ \t]*\\(\\sw+\\)?"
+     (1 font-lock-keyword-face) (3 font-lock-function-name-face nil t))
+   ;; Types
+   (cons (concat "\\<\\("
+		 "B\\(OOLEAN\\|ITSET\\)\\|C\\(ARDINAL\\|HAR\\)\\|"
+		 "FLOAT\\|INTEGER\\|LONG\\(CARD\\|INT\\|REAL\\)\\|"
+		 "REAL\\|SHORTCARD\\)\\>")
+	 'font-lock-type-face)
+   ;; Standard identifers
+   (cons (concat "\\<\\("
+		 "ABS\\|AND\\|CHR\\|CAP\\|DIV\\|EX\\(CL\\|IT\\)\\|"
+		 "HALT\\|HIGH\\|IN\\|INC\\|INCL\\|M\\(AX\\|IN\\|OD\\)\\|"
+		 "NOT\\|O\\(DD\\|R\\|RD\\)\\|SIZE\\|TRUNC\\|VAL\\)\\>")
+	 'font-lock-function-name-face)
+   ;; Standard constants
+   '("\\<\\(DISPOSE\\|N\\(IL\\|EW\\)\\|TRUE\\|FALSE\\|PROC\\)\\>" . 
+     font-lock-function-name-face)
+   '("\\<\\(CONST\\|VAR\\|SEQ\\|TYPE\\)\\>" . font-lock-reference-face)
+   '("[|]\\<\\([a-zA-Z_.,0-9]+\\)[ \t]*:" 1 font-lock-reference-face)
+   '("\\<\\([a-zA-Z_0-9]+\\)[ \t]*[=]" 1 font-lock-variable-name-face)
+   ;; Keywords
+   (cons (concat "\\<\\("
+	   "ARRAY\\|B\\(EGIN\\|Y\\)\\|CASE\\|DO\\|DEFINITION\\|"
+	   "E\\(LSE\\|LSEIF\\|ND\\|XPORT\\)\\|F\\(OR\\|ROM\\)\\|"
+	   "IF\\|IMP\\(LEMENTATION\\|ORT\\)\\|LOOP\\|MODULE\\|"
+	   "OF\\|POINTER\\|RE\\(PEAT\\|CORD\\)\\|SET\\|T\\(HEN\\|O\\)\\|"
+	   "UNTIL\\|W\\(HILE\\|ITH\\)"
+	   "\\)\\>") 'font-lock-keyword-face))
+  "Additional expressions to highlight in Modula2 mode.")
+
+(defvar m2-indent 2
+  "*Indentation of Modula2 statements is 2.")
+
+;;;###autoload
+(defun modula-2-mode ()
+  "This is a mode intended to support program development in Modula-2.
+All control constructs of Modula-2 can be reached by typing C-c
+followed by the first character of the construct.
+\\<m2-mode-map>
+  \\[m2-begin] begin         \\[m2-case] case
+  \\[m2-definition] definition    \\[m2-else] else
+  \\[m2-for] for           \\[m2-header] header
+  \\[m2-if] if            \\[m2-module] module
+  \\[m2-loop] loop          \\[m2-or] or
+  \\[m2-procedure] procedure     Control-c Control-w with
+  \\[m2-record] record        \\[m2-stdio] stdio
+  \\[m2-type] type          \\[m2-until] until
+  \\[m2-var] var           \\[m2-while] while
+  \\[m2-export] export        \\[m2-import] import
+  \\[m2-begin-comment] begin-comment \\[m2-end-comment] end-comment
+  \\[suspend-emacs] suspend Emacs     \\[m2-toggle] toggle
+  \\[m2-compile] compile           \\[m2-next-error] next-error
+  \\[m2-link] link
+
+   `m2-indent' controls the number of spaces for each indentation.
+   `m2-compile-command' holds the command to compile a Modula-2 program.
+   `m2-build-command' holds the command to link a Modula-2 program."
+  (interactive)
+  (kill-all-local-variables)
+  (use-local-map m2-mode-map)
+  (setq major-mode 'modula-2-mode)
+  (setq mode-name "Modula-2")
+  (make-local-variable 'comment-column)
+  (setq comment-column 41)
+  (make-local-variable 'end-comment-column)
+  (setq end-comment-column 75)
+  (set-syntax-table m2-mode-syntax-table)
+  (make-local-variable 'paragraph-start)
+  (setq paragraph-start (concat "$\\|" page-delimiter))
+  (make-local-variable 'paragraph-separate)
+  (setq paragraph-separate paragraph-start)
+  (make-local-variable 'case-fold-search)
+  (setq case-fold-search nil)
+  (make-local-variable 'paragraph-ignore-fill-prefix)
+  (setq paragraph-ignore-fill-prefix t)
+  (make-local-variable 'indent-line-function)
+  (setq indent-line-function 'm2-indent-line)
+  (make-local-variable 'require-final-newline)
+  (setq require-final-newline t)
+  (make-local-variable 'comment-start)
+  (setq comment-start "(*")
+  (make-local-variable 'comment-end)
+  (setq comment-end "*)")
+  (make-local-variable 'comment-start-skip)
+  (setq comment-start-skip "(\\*+ *")
+  (make-local-variable 'comment-indent-function)
+  (setq comment-indent-function 'c-comment-indent)
+  (make-local-variable 'parse-sexp-ignore-comments)
+  (setq parse-sexp-ignore-comments nil)
+  (make-local-variable 'font-lock-defaults)
+  (setq font-lock-defaults '(m2-font-lock-keywords nil t))
+  (run-hooks 'm2-mode-hook))
+
+(defun m2-newline ()
+  "Insert a newline and indent following line like previous line."
+  (interactive)
+  (let ((hpos (current-indentation)))
+    (newline)
+    (indent-to hpos)))
+
+(defun m2-tab ()
+  "Indent to next tab stop."
+  (interactive)
+  (indent-to (* (1+ (/ (current-indentation) m2-indent)) m2-indent)))
+
+(defun m2-begin ()
+  "Insert a BEGIN keyword and indent for the next line."
+  (interactive)
+  (insert "BEGIN")
+  (m2-newline)
+  (m2-tab))
+
+(defun m2-case ()
+  "Build skeleton CASE statment, prompting for the <expression>."
+  (interactive)
+  (let ((name (read-string "Case-Expression: ")))
+    (insert "CASE " name " OF")
+    (m2-newline)
+    (m2-newline)
+    (insert "END (* case " name " *);"))
+  (end-of-line 0)
+  (m2-tab))
+
+(defun m2-definition ()
+  "Build skeleton DEFINITION MODULE, prompting for the <module name>."
+  (interactive)
+  (insert "DEFINITION MODULE ")
+  (let ((name (read-string "Name: ")))
+    (insert name ";\n\n\n\nEND " name ".\n"))
+  (previous-line 3))
+
+(defun m2-else ()
+  "Insert ELSE keyword and indent for next line."
+  (interactive)
+  (m2-newline)
+  (backward-delete-char-untabify m2-indent ())
+  (insert "ELSE")
+  (m2-newline)
+  (m2-tab))
+
+(defun m2-for ()
+  "Build skeleton FOR loop statment, prompting for the loop parameters."
+  (interactive)
+  (insert "FOR ")
+  (let ((name (read-string "Loop Initialiser: ")) limit by)
+    (insert name " TO ")
+    (setq limit (read-string "Limit: "))
+    (insert limit)
+    (setq by (read-string "Step: "))
+    (if (not (string-equal by ""))
+	(insert " BY " by))
+    (insert " DO")
+    (m2-newline)
+    (m2-newline)
+    (insert "END (* for " name " to " limit " *);"))
+  (end-of-line 0)
+  (m2-tab))
+
+(defun m2-header ()
+  "Insert a comment block containing the module title, author, etc."
+  (interactive)
+  (insert "(*\n    Title: \t")
+  (insert (read-string "Title: "))
+  (insert "\n    Created:\t")
+  (insert (current-time-string))
+  (insert "\n    Author: \t")
+  (insert (user-full-name))
+  (insert (concat "\n\t\t<" (user-login-name) "@" (system-name) ">\n"))
+  (insert "*)\n\n"))
+
+(defun m2-if ()
+  "Insert skeleton IF statment, prompting for <boolean-expression>."
+  (interactive)
+  (insert "IF ")
+  (let ((thecondition (read-string "<boolean-expression>: ")))
+    (insert thecondition " THEN")
+    (m2-newline)
+    (m2-newline)
+    (insert "END (* if " thecondition " *);"))
+  (end-of-line 0)
+  (m2-tab))
+
+(defun m2-loop ()
+  "Build skeleton LOOP (with END)."
+  (interactive)
+  (insert "LOOP")
+  (m2-newline)
+  (m2-newline)
+  (insert "END (* loop *);")
+  (end-of-line 0)
+  (m2-tab))
+
+(defun m2-module ()
+  "Build skeleton IMPLEMENTATION MODULE, prompting for <module-name>."
+  (interactive)
+  (insert "IMPLEMENTATION MODULE ")
+  (let ((name (read-string "Name: ")))
+    (insert name ";\n\n\n\nEND " name ".\n")
+    (previous-line 3)
+    (m2-header)
+    (m2-type)
+    (newline)
+    (m2-var)
+    (newline)
+    (m2-begin)
+    (m2-begin-comment)
+    (insert " Module " name " Initialisation Code "))
+  (m2-end-comment)
+  (newline)
+  (m2-tab))
+
+(defun m2-or ()
+  (interactive)
+  (m2-newline)
+  (backward-delete-char-untabify m2-indent)
+  (insert "|")
+  (m2-newline)
+  (m2-tab))
+
+(defun m2-procedure ()
+  (interactive)
+  (insert "PROCEDURE ")
+  (let ((name (read-string "Name: " ))
+	args)
+    (insert name " (")
+    (insert (read-string "Arguments: ") ")")
+    (setq args (read-string "Result Type: "))
+    (if (not (string-equal args ""))
+	(insert " : " args))
+    (insert ";")
+    (m2-newline)
+    (insert "BEGIN")
+    (m2-newline)
+    (m2-newline)
+    (insert "END ")
+    (insert name)
+    (insert ";")
+    (end-of-line 0)
+    (m2-tab)))
+
+(defun m2-with ()
+  "Build skeleton WITH (with END), prompting <record-type>."
+  (interactive)
+  (insert "WITH ")
+  (let ((name (read-string "Record-Type: ")))
+    (insert name)
+    (insert " DO")
+    (m2-newline)
+    (m2-newline)
+    (insert "END (* with " name " *);"))
+  (end-of-line 0)
+  (m2-tab))
+
+(defun m2-record ()
+  "Build skeleton RECORD (with END), prompting <record-name>."
+  (interactive)
+  (insert "RECORD")
+  (let ((name (read-string "Record-Name: ")))
+    (insert " = ")
+    (insert name)
+    (m2-newline)
+    (m2-newline)
+    (insert "END (* record " name " *);"))
+  (end-of-line 0)
+  (m2-tab))
+
+;(defun m2-stdio ()
+;  (interactive)
+;  (insert "
+;FROM TextIO IMPORT 
+;   WriteCHAR, ReadCHAR, WriteINTEGER, ReadINTEGER,
+;   WriteCARDINAL, ReadCARDINAL, WriteBOOLEAN, ReadBOOLEAN,
+;   WriteREAL, ReadREAL, WriteBITSET, ReadBITSET,
+;   WriteBasedCARDINAL, ReadBasedCARDINAL, WriteChars, ReadChars,
+;   WriteString, ReadString, WhiteSpace, EndOfLine;
+;
+;FROM SysStreams IMPORT sysIn, sysOut, sysErr;
+;
+;"))
+
+(defun m2-type ()
+  "Insert TYPE statement and indent for next line."
+  (interactive)
+  (insert "TYPE")
+  (m2-newline)
+  (m2-tab))
+
+(defun m2-until ()
+  "Build skeleton REPEAT - UNTIL, prompting <boolean-experession>."
+  (interactive)
+  (insert "REPEAT")
+  (m2-newline)
+  (m2-newline)
+  (insert "UNTIL ")
+  (insert (read-string "<boolean-expression>: ") ";")
+  (end-of-line 0)
+  (m2-tab))
+
+(defun m2-var ()
+  "Insert VAR statement and indent for next line."
+  (interactive)
+  (m2-newline)
+  (insert "VAR")
+  (m2-newline)
+  (m2-tab))
+
+(defun m2-while ()
+  "Build skeleton WHILE (with END), prompting <boolean-experession>."
+  (interactive)
+  (insert "WHILE ")
+  (let ((name (read-string "<boolean-expression>: ")))
+    (insert name " DO" )
+    (m2-newline)
+    (m2-newline)
+    (insert "END (* while " name " *);"))
+  (end-of-line 0)
+  (m2-tab))
+
+(defun m2-export ()
+  "Insert EXPORT QUALIFIED expression."
+  (interactive)
+  (insert "EXPORT QUALIFIED "))
+
+(defun m2-import ()
+  "Insert FROM IMPORT skeleton, prompting <module-name>."
+  (interactive)
+  (insert "FROM ")
+  (insert (read-string "Module: "))
+  (insert " IMPORT "))
+
+(defun m2-begin-comment ()
+  "Insert the beginning of the comments."
+  (interactive)
+  (if (not (bolp))
+      (indent-to comment-column 0))
+  (insert "(*  "))
+
+(defun m2-end-comment ()
+  "Insert the ending of the comments."
+  (interactive)
+  (if (not (bolp))
+      (indent-to end-comment-column))
+  (insert "*)"))
+
+(defun m2-compile ()
+  "Compile a module."
+  (interactive)
+  (setq modulename (buffer-name))
+  (compile (concat m2-compile-command " " modulename)))
+
+(defun m2-build ()
+  "Build a project by prompting name."
+  (interactive)
+  (setq modulename (buffer-name))
+  (if m2-project-name
+      (compile (concat m2-build-command " " m2-project-name))
+    (compile (concat m2-build-command " "
+		     (setq m2-project-name (read-string "Name of executable: "
+							modulename))))))
+
+(defun m2-execute-monitor-command (command)
+  (let* ((shell shell-file-name)
+	 (csh (equal (file-name-nondirectory shell) "csh")))
+    (call-process shell nil t t "-cf" (concat "exec " command))))
+
+(defun m2-visit ()
+  "Make a visit to prompting module using redirections (require m2whereis program for redirection search)."
+  (interactive)
+  (let ((deffile nil)
+	(modfile nil)
+	modulename)
+    (save-excursion
+      (setq modulename
+	    (read-string "Module name: "))
+      (switch-to-buffer "*Command Execution*")
+      (m2-execute-monitor-command (concat "m2whereis " modulename))
+      (goto-char (point-min))
+      (condition-case ()
+	  (progn (re-search-forward "\\(.*\\.def\\) *$")
+		 (setq deffile (buffer-substring (match-beginning 1)
+						 (match-end 1))))
+	(search-failed ()))
+      (condition-case ()
+	  (progn (re-search-forward "\\(.*\\.mod\\) *$")
+		 (setq modfile (buffer-substring (match-beginning 1)
+						 (match-end 1))))
+	(search-failed ()))
+      (if (not (or deffile modfile))
+	  (error "I can find neither definition nor implementation of %s"
+		 modulename)))
+    (cond (deffile
+	    (find-file deffile)
+	    (if modfile
+		(save-excursion
+		  (find-file modfile))))
+	  (modfile
+	   (find-file modfile)))))
+
+(defun m2-toggle ()
+  "Toggle between .mod and .def files for the module."
+  (interactive)
+  (cond ((string-equal (substring (buffer-name) -4) ".def")
+	 (find-file-other-window
+	  (concat (substring (buffer-name) 0 -4) ".mod")))
+	((string-equal (substring (buffer-name) -4) ".mod")
+	 (find-file-other-window
+	  (concat (substring (buffer-name) 0 -4)  ".def")))
+	((string-equal (substring (buffer-name) -3) ".mi")
+	 (find-file-other-window
+	  (concat (substring (buffer-name) 0 -3)  ".md")))
+	((string-equal (substring (buffer-name) -3) ".md")
+	 (find-file-other-window
+	  (concat (substring (buffer-name) 0 -3)  ".mi")))))
+
+;;;======================================================================
+;;; The stuff in this section relate to indentation.
+
+(defun m2-indent-line ()
+  "Indent the current-line."
+  (interactive)
+  (m2-indent-line-work t))
+
+(defun m2-indent-line-work (electric)
+  ;; If in unterminated string, give an error.  If in comment and
+  ;; electric, indent like previous line.
+;;;  (message "indent-line-work") (sit-for 2)
+  (let ((string-comment-state (m2-in-comment-or-string)))
+    (cond
+     ((eq string-comment-state 'string)
+      (beep)
+      (message "Unterminated Text literal..."))
+     ((eq string-comment-state 'comment)
+      (if electric
+	  (let ((cur-point (point)))
+	    (beginning-of-line)
+	    (m2-skip-whitespace-in-line)
+	    (cond
+	     ;; If the current line begines with a close comment,
+	     ;; indent it to the level of the matching start comment.
+	     ((save-excursion
+		(beginning-of-line)
+		(m2-skip-whitespace-in-line)
+		(looking-at "*)"))
+	      (m2-indent-to
+	       cur-point
+	       (save-excursion
+		 (beginning-of-line)
+		 (m2-skip-whitespace-in-line)
+		 (forward-char 2)
+		 (m2-skip-comment-backward (point-min) t)
+		 (current-column))))
+
+	     ;;; If the current line begins with an open-comment, and
+	     ;;; the opened comment is not nested, indent like a code line.
+	     ((save-excursion
+		(beginning-of-line)
+		(m2-skip-whitespace-in-line)
+		(and (looking-at "(*")
+		     (not (m2-in-comment-or-string))))
+	      (m2-indent-to cur-point (m2-indent-for-line)))
+
+	     ;;; Otherwise, indent to same level as previous
+	     ;;; non-whitespace line.
+	     (t
+	      (m2-indent-to
+	       cur-point
+	       (save-excursion
+		 (forward-line -1)
+		 (while (looking-at m2-whitespace-line-re)
+		   (forward-line -1))
+		 (m2-skip-whitespace-in-line)
+		 (if (looking-at "(\\*")
+		     (progn (forward-char 2)
+			    (m2-skip-whitespace-in-line)))
+		 (current-column))))))))
+
+     ;; We're not in a comment or a string.  Indent the current line.
+     (t
+      (m2-indent-to (point) (m2-indent-for-line))
+      ;; Do the appropriate thing for electric end's.
+      (m2-do-electric-end)))))
+
+
+(defun m2-indent-for-line ()
+  (save-excursion
+    (beginning-of-line)
+    (let ((cur-point (point))
+	  (part-start (save-excursion
+			(m2-backward-to-last-part-begin)
+			(point)))
+	  (first-code
+	   (save-excursion
+	     (re-search-forward "[ \t]*"
+				(save-excursion (end-of-line) (point))
+				t)
+	     (goto-char (match-end 0))
+;;;	     (message "first-code 2") (sit-for 2)
+	     (point)))
+	  ;; Must do this because Modula is case-sensitive
+	  (case-fold-search nil))
+
+      ;; Find end of previous statement or last keyword-line-starter.
+;;;      (message "m2-indent-for-line(A)") (sit-for 2)
+
+      (m2-re-search-backward
+       (concat "\\(;\\|^[ \t]*\\(" m2-keyword-line-starters "\\)\\)")
+       part-start t)
+      (while (m2-in-arg-list part-start)
+	(m2-re-search-backward
+	 (concat "\\(;\\|^[ \t]*\\(" m2-keyword-line-starters "\\)\\)")
+	 part-start t))
+      (cond
+       ((and (looking-at ";")
+	     (save-excursion
+	       (beginning-of-line)
+	       (re-search-forward
+		(concat "^[ \t]*\\(" m2-keyword-line-starters "\\)")
+		(save-excursion (end-of-line) (point))
+		t)))
+	(beginning-of-line)
+	(re-search-forward "[ \t]*"))
+
+       (t
+	;; skip to the keyword;
+	(re-search-forward "[ \t]*")))
+
+;;;      (message "m2-indent-for-line(B)") (sit-for 2)
+
+      ;; Now figure out if there is an intervening incomplete
+      ;; statement between here and the original line.
+      (let ((prev-statement-start (point)))
+;;;	(message "Checking completeness") (sit-for 2)
+	(cond
+	 ;; Is it incomplete?
+	 ((m2-prev-line-incomplete-p cur-point part-start)
+
+	  ;; ...OK, the previous line *was* incomplete.
+	  (goto-char cur-point)
+;;;	  (message "m2-indent-for-line: incomplete") (sit-for 2)
+	  (m2-incomplete-indent cur-point first-code part-start))
+
+	 (t
+	  ;; No: the previous line completed a statement, so find it's
+	  ;; start and indent from that.
+;;;	  (message "m2-indent-for-line: complete") (sit-for 2)
+
+	  (let ((skip-one
+		 (and (save-excursion
+			(goto-char first-code)
+			(looking-at m2-keyword-ssl-enders))
+		      (save-excursion
+			(goto-char first-code)
+			(m2-re-search-backward
+			 (concat "\\(" m2-keyword-endable-ssl-introducers
+				 "\\|;\\)")
+			 part-start t)
+			(not (looking-at ";"))))))
+
+;;;	    (message "m2-IFL complete(2): skip-one = %s" skip-one) (sit-for 2)
+	    (goto-char cur-point)
+	    (beginning-of-line)
+	    (m2-re-search-backward
+	     (concat "\\(;\\|END\\|\\("
+		     m2-keyword-endable-ssl-introducers "\\|"
+		     m2-part-starters "\\)\\)")
+	     part-start 'move-to-limit)
+;;;	    (message "m2-IFL complete(2.5-1)") (sit-for 2)
+	    (while (m2-in-arg-list part-start)
+;;;	      (message "m2-IFL complete(2.5-2)") (sit-for 2)
+	      (m2-re-search-backward
+	       (concat "\\(;\\|END\\|\\(" m2-keyword-endable-ssl-introducers
+		       "\\|" m2-part-starters "\\)\\)")
+	       part-start 'move-to-limit))
+
+	    ;; Should now be at the beginning of the last
+	    ;; ';', END, comment-start on left margin, or ssl-introducer.
+;;;	    (message "m2-IFL complete(3)") (sit-for 2)
+	    (cond
+	     (skip-one
+;;;	      (message "m2-IFL skip-one(1)") (sit-for 2)
+	      (if (looking-at ";") (error "Bad logic."))
+	      (cond
+	       ((looking-at (concat "^" m2-com-start-re))
+;;;		(message "m2-IFL skip-one left-margin-commment") (sit-for 2)
+		0)
+	       (t
+		(re-search-forward m2-keyword-line-starters (point-max) t)
+		(goto-char (match-end 0))
+;;;		(message "m2-IFL skip-one(2)") (sit-for 2)
+		(let ((eol (save-excursion (end-of-line) (point))))
+		  (m2-forward-to-code first-code)
+;;;		  (message "m2-IFL skip-one(3)") (sit-for 2)
+		  (cond
+		   ;; Is there stuff between the keyword and the current line?
+		   ((and (> (point) eol) (< (point) first-code))
+;;;		    (message "m2-IFL: skip-1 indentation x") (sit-for 2)
+		    (m2-complete-adjust-indent (current-column) first-code
+					       part-start))
+		   ;; No;
+		   (t
+;;;		    (message "m2-IFL: skip-1 indentation y0") (sit-for 2)
+		    (m2-re-search-backward
+		     (concat "^[ \t]*\\(" m2-keyword-line-starters "\\)")
+		     part-start t)
+		    (re-search-forward m2-keyword-line-starters first-code t)
+		    (goto-char (match-beginning 0))
+		    (cond
+		     ((save-excursion
+			(beginning-of-line)
+			(looking-at (concat "[ \t]*" m2-multi-keyword-lines)))
+		      (beginning-of-line)
+		      (re-search-forward "[ \t]*" first-code t)
+		      (goto-char (match-end 0))))
+;;;		    (message "m2-IFL: skip-1 indentation y") (sit-for 2)
+		    (m2-after-keyword-adjust-indent
+		     (current-column)
+		     first-code part-start)))))))
+
+	     (t
+;;;	      (message "m2-IFL skip-two") (sit-for 2)
+	      ;; First of all, are we in a procedure argument list?
+	      (let ((in-arg-list (m2-in-arg-list part-start)))
+		(cond
+		 ;; Are we at the beginning of the file?
+		 ;; If so, move current line to left margin.
+		 ((eq (save-excursion
+			(m2-backward-to-code (point-min))
+;;;			(message "m2-IFL foo: %d" (point)) (sit-for 2)
+			(point))
+		      1)
+		  0)
+
+		 ;; Are we looking at a comment on the left margin?
+		 ((looking-at (concat "^" m2-com-start-re))
+		  0)
+
+		 ;; Is it a keyword starting a line?
+		 ((save-excursion
+		    (beginning-of-line)
+		    (looking-at
+		     (concat "[ \t]*\\(" m2-keyword-line-starters "\\|"
+			     m2-part-starters "\\)")))
+;;;		  (message "m2-IFL: after complete keyword") (sit-for 2)
+		  (beginning-of-line)
+		  (re-search-forward
+		   (concat m2-keyword-line-starters "\\|" m2-part-starters)
+		   (point-max) t)
+		  (goto-char (match-beginning 0))
+;;;		  (message "m2-IFL: after complete keyword 2") (sit-for 2)
+		  (m2-after-keyword-adjust-indent (current-column)
+						  first-code part-start))
+
+		 (t
+		  ;; No; skip backwards another then forward-to-code
+;;;		  (message "m2-IFL: skip-two xxx") (sit-for 2)
+		  (if (not
+		       (looking-at
+			(concat m2-keyword-endable-ssl-introducers "\\|;")))
+		      (error "Bad logic 2."))
+		  (let ((last-complete (looking-at ";\\|END")))
+		    (beginning-of-line)
+		    (m2-re-search-backward
+		     (concat "\\(;\\|END\\|\\("
+			     m2-keyword-endable-ssl-introducers "\\)\\)")
+		     part-start 'move-to-limit)
+;;;		    (message "m2-IFL: skip-two xxx 2") (sit-for 2)
+		    (while (and (not in-arg-list) (m2-in-arg-list part-start))
+;;;		      (message "m2-IFL: skip-two xxx 2.2") (sit-for 2)
+		      (m2-re-search-backward
+		       (concat "\\(;\\|END\\|\\("
+			       m2-keyword-line-starters "\\)\\)")
+		       part-start t))
+;;;		    (message "m2-IFL: skip-two xxx 2.5") (sit-for 2)
+		    (let ((continue t) (OF-end (point)))
+		      (while (and (looking-at "OF") continue)
+			(if (re-search-backward
+			     "SET[ \t]*\\|ARRAY[ \t]*\\[[^]]*\\][ \t]*"
+			     part-start t)
+			    (cond
+			     ((eq (match-end 0) OF-end)
+			      (m2-re-search-backward
+			       (concat "\\(;\\|\\("
+				       m2-keyword-line-starters "\\)\\)")
+			       part-start t))
+			     (t (setq continue nil)))
+			  (setq continue nil))))
+			  
+;;;		    (message "m2-IFL: skip-two xxx 3") (sit-for 2)
+		    ;; If we're at part-start, then that is the indentation
+		    ;; (Since part-starts are not ssl-introducers?)
+		    (if (or (not (eq (point) part-start))
+			    (looking-at m2-keyword-endable-ssl-introducers))
+			(progn
+			  (re-search-forward
+			   (concat "\\(;\\|END\\|\\("
+				   m2-keyword-endable-ssl-introducers "\\)\\)")
+			   (point-max) t)
+			  (goto-char (match-end 0))
+;;;			  (message "m2-IFL: skip-two xxx 4") (sit-for 2)
+			  (m2-forward-to-code cur-point)))
+
+;;;		    (message "m2-indent-for-line: indentation") (sit-for 2)
+		    (cond
+		     (last-complete
+		      (m2-complete-adjust-indent (current-column) first-code
+						 part-start))
+		     (t
+		      (m2-after-keyword-adjust-indent (current-column)
+						      first-code part-start)
+		      )))))))))))))))
+
+
+
+
+(defun m2-in-arg-list (part-start)
+  "Returns non-NIL iff the point is in a procedure or method argument
+list."
+;;;  (message "m2-in-arg-list(1)") (sit-for 2)
+  (save-excursion
+    (let ((cur-point (point)))
+      (m2-re-search-backward "PROCEDURE\\|METHODS" part-start t)
+      (cond
+       ((looking-at "PROCEDURE")
+	(forward-word 1)
+	(m2-re-search-forward "([^*]" (point-max) t)
+;;;	(message "m2-in-arg-list(3)") (sit-for 2)
+	(and (< (point) cur-point)
+	     (condition-case err
+		 (progn
+		   (forward-sexp 1)
+;;;		   (message "m2-in-arg-list(4)") (sit-for 2)
+		   (> (point) cur-point))
+	       (error t))))
+
+       ((looking-at "METHODS")
+	(let ((continue t) (res nil))
+	  (while (and continue (< (point) cur-point))
+	    (m2-re-search-forward "([^*]\\|END" (point-max) t)
+;;;	    (message "m2-in-arg-list(101)") (sit-for 2)
+	    (cond
+	     ((and (looking-at "([^*]") (< (point) cur-point))
+;;;	      (message "m2-in-arg-list(101.5)") (sit-for 2)
+	      (condition-case err
+		  (progn
+		    (forward-sexp 1)
+;;;		    (message "m2-in-arg-list(102)") (sit-for 2)
+		    (if (> (point) cur-point) (setq res t)))
+		(error
+		 ;; No matching right paren, so must still be in arg list.
+;;;		 (message "m2-in-arg-list(103)") (sit-for 2)
+		 (setq continue nil)
+		 (setq res t))))
+	     (t
+;;;	      (message "m2-in-arg-list(104)") (sit-for 2)
+	      (setq continue nil))))
+	  res))
+
+       (t nil)))))
+	      
+
+
+(defun m2-prev-line-incomplete-p (cur-point part-start)
+;;;  (message "incomplete?") (sit-for 2)
+  (or
+   ;; Does the previous non-blank line end with an operator?
+   (save-excursion
+;;;     (message "incomplete-1") (sit-for 2)
+     (goto-char cur-point)
+     (m2-backward-to-code part-start)
+     (or (looking-at "[+\\-*&#<,]")
+	 (and (looking-at ">")
+	      (save-excursion
+		(beginning-of-line)
+;;;		(message "incomplete-1.1") (sit-for 2)
+		(not (looking-at
+		      (concat "[ \t]*"
+			      m2-handler-start-re
+			      "[ \t]*\\($\\|(\\*\\)")))))
+	 (and (looking-at "=")
+	      (save-excursion
+;;;		(message "incomplete-1.2") (sit-for 2)
+		(beginning-of-line)
+;;;		(message "incomplete-1.21") (sit-for 2)
+		(and (not (looking-at
+			   (concat "PROCEDURE.*=[ \t]*\\($\\|(\\*\\)")))
+		     (not (m2-in-arg-list part-start)))))
+		     
+	 (and (> (point) 2)
+	      (progn
+		(forward-char -2)
+		(or (looking-at
+		     (concat m2-not-identifier-char-re "OR"))
+		    (and
+		     (> (point) 1)
+		     (progn
+		       (forward-char -1)
+		       (looking-at
+			(concat m2-not-identifier-char-re
+				"\(DIV\\|MOD\\|AND\\|NOT")))))))))
+
+   (save-excursion
+     (goto-char cur-point)
+     (m2-backward-to-code part-start)
+     (forward-char 1)
+;;;     (message "incomplete-1B1") (sit-for 2)
+     (let ((last-char (point)))
+       (beginning-of-line 1)
+       (and (re-search-forward
+	     (concat "^[ \t]*\\(" m2-statement-keywords "\\)")
+	     cur-point t)
+	    (= last-char (match-end 0)))))
+
+   (save-excursion
+;;;     (message "incomplete-2") (sit-for 2)
+     (cond
+      ((looking-at "END;")
+;;;       (message "incomplete-2.01") (sit-for 2)
+       (forward-char 4))
+      ((looking-at
+	(concat "END[ \t]*" m2-identifier-re "[ \t]*\\(;\\|\\.\\)"))
+;;;       (message "incomplete-2.02") (sit-for 2)
+       (re-search-forward
+	(concat "END[ \t]*" m2-identifier-re "[ \t]*\\(;\\|\\.\\)")
+	(point-max) t)
+       (goto-char (match-end 0)))
+      ((looking-at m2-multi-keyword-line-prefix)
+;;;       (message "incomplete-2.1") (sit-for 2)
+       (re-search-forward m2-multi-keyword-line-prefix (point-max) t)
+       (goto-char (match-end 0)))
+
+      ((looking-at "PROCEDURE")
+;;;       (message "incomplete-2.15") (sit-for 2)
+       (forward-word 1)
+       (m2-re-search-forward "([^*]" (point-max) t)
+       (let ((new-point (point)))
+	 (save-excursion
+	  (condition-case err
+	      (forward-sexp 1)
+	    (error (goto-char (point-max))))
+;;;	  (message "incomplete-2.15-2") (sit-for 2)
+	  (and (< (point) cur-point)
+	       (m2-re-search-forward "=" (point-max) t)
+	       (progn
+		 (forward-char 1)
+		 (and (< (point) cur-point)
+;;;		      (message "incomplete-2.15-3") (sit-for 2)
+		      (setq new-point (point))))))
+	 (goto-char new-point)))
+
+      ((looking-at "WITH")
+;;;       (message "incomplete-2.191") (sit-for 2)
+       (forward-word 1)
+       (let ((new-point (point)))
+	 (m2-re-search-forward "DO" first-code t)
+;;;	 (message "incomplete-2.192") (sit-for 2)
+	 (cond
+	  ((looking-at "DO")
+	   (forward-word 1)
+;;;	   (message "incomplete-2.193") (sit-for 2)
+	   (setq new-point (point))))
+	 (goto-char new-point)))
+
+      ((looking-at "END")
+       (forward-word 1)
+       (cond
+	((save-excursion
+	   (m2-forward-to-code (point-max))
+	   (looking-at ";"))
+	 (m2-forward-to-code (point-max))
+	 (forward-char 1))))
+
+      ;; If looking-at keyword-line-starter or part-starter
+      ((looking-at (concat m2-keyword-line-starters "\\|" m2-part-starters))
+;;;       (message "incomplete-2.2") (sit-for 2)
+       (re-search-forward
+	(concat m2-keyword-line-starters "\\|" m2-part-starters)
+	(point-max) t)
+       (goto-char (match-end 0)))
+
+      ((looking-at ";")
+       (forward-char 1)))
+
+     ;; Go forward to code.
+;;;     (message "m2-IFL: before codepoint") (sit-for 2)
+     (m2-forward-to-code (point-max))
+     ;; Is there something between the last ';' and the current
+     ;; line?
+;;;     (message "m2-IFL: codepoint") (sit-for 2)
+     (and
+      (< (point) cur-point)
+      ;; Yes -- means that the previous statement was incomplete...
+
+      ;; ...unless the current line is an ssl-ender, in which
+      ;; case it is assumed complete...
+;;;      (message "incomplete-3") (sit-for 2)
+      (or (not
+	   (save-excursion
+	     (goto-char first-code)
+;;;	     (message "incomplete-3.1") (sit-for 2)
+	     (looking-at m2-keyword-ssl-enders)))
+	  (save-excursion
+;;;	    (message "incomplete-3.2") (sit-for 2)
+	    (goto-char first-code)
+	    (m2-backward-to-code part-start)
+	    (forward-char 1)
+;;;	    (message "incomplete-3.21") (sit-for 2)
+	    (let ((after (point)))
+	      (m2-re-search-backward m2-keyword-endable-ssl-introducers
+				     part-start t)
+	      (re-search-forward m2-keyword-endable-ssl-introducers
+				 cur-point t)
+	      (goto-char (match-end 0))
+;;;	      (message "incomplete-3.22") (sit-for 2)
+	      (= (point) after))))
+
+      ;; ... or there is a an ssl-ender between here and first-code
+      ;; that is not a semi in an argument list...
+      (not (save-excursion
+;;;	     (message "incomplete-3.3-0") (sit-for 2)
+	     (and (m2-re-search-forward
+		   (concat ";\\|" m2-keyword-ssl-enders)
+		   first-code 't)
+		  (let ((continue t))
+		    (while (and continue (m2-in-arg-list part-start))
+;;;		      (message "incomplete-3.3-1") (sit-for 2)
+		      (re-search-forward
+		       (concat ";\\|" m2-keyword-ssl-enders)
+		       first-code 't)
+		      (goto-char (match-end 0))
+;;;		      (message "incomplete-3.3-2") (sit-for 2)
+		      (setq continue
+			    (m2-re-search-forward
+			     (concat ";\\|" m2-keyword-ssl-enders)
+			     first-code 't)))
+		    continue)
+;;;		  (message "incomplete-3.3") (sit-for 2)
+		  (< (point) first-code))))
+
+      ;; ... or the previous statement is a multi-keyword statement
+      ;; and the current line is completed by a subsequent keyword...
+      (not
+       (save-excursion
+	 (goto-char cur-point)
+	 (m2-backward-to-non-comment-line-start part-start)
+;;;	 (message "m2-indent-for-line: multi-keyword") (sit-for 2)
+	 (looking-at m2-multi-keyword-lines)))
+      ))))
+
+
+
+;; Constants, especially helpful regexps.
+
+(defconst m2-identifier-char-re "[a-zA-Z0-9_]")
+(defconst m2-alpha-char-re "[a-zA-Z_]")
+(defconst m2-not-identifier-char-re "[^a-zA-Z0-9_]")
+
+(defconst m2-identifier-re
+  (concat "\\b" m2-alpha-char-re m2-identifier-char-re "*\\b"))
+
+(defconst m2-intlit-re "[1-9][0-9]*")
+
+(defconst m2-poss-qual-ident-re
+  (concat "\\(" "\\(" m2-identifier-re "\\.\\)?" m2-identifier-re "\\.\\)?"
+	  m2-identifier-re))
+
+(defconst m2-com-start-re "\\((\\*\\|<\\*\\)")
+(defconst m2-com-end-re "\\(\\*)\\|\\*>\\)")
+(defconst m2-com-start-or-end-re
+  (concat "\\\(" m2-com-start-re "\\|" m2-com-end-re "\\)"))
+
+(defconst m2-whitespace-char-re "[ \t]")
+(defconst m2-poss-whitespace-re "[ \t]*")
+(defconst m2-poss-whitespace-nl-re "[ \t\n]*")
+(defconst m2-whitespace-line-re "^[ \t\n]*$")
+
+
+(defconst m2-char-lit-re "'\\([^\\]\\|\\\\..?.?\\)'")
+
+(defconst m2-range-re
+  (concat m2-intlit-re m2-poss-whitespace-re "\\.\\."
+	  m2-poss-whitespace-re m2-intlit-re))
+  
+  
+(defconst m2-case-label-re
+  (concat "\\(" m2-poss-qual-ident-re "\\|"
+	  m2-char-lit-re "\\|"
+	  m2-intlit-re "\\|"
+	  m2-range-re
+	  "\\)"))
+
+(defconst m2-handler-start-re
+  (concat "\\(|[ \t]*\\)?\\("
+	  (concat "\\b" m2-poss-qual-ident-re m2-poss-whitespace-re
+		  "(" m2-poss-whitespace-re m2-identifier-re
+		  m2-poss-whitespace-re ")" )
+	  "\\|"
+	  (concat "\\b" m2-case-label-re
+		  (concat "\\(" m2-poss-whitespace-re ","
+			  m2-poss-whitespace-nl-re m2-case-label-re "\\)*"))
+	  
+	  "\\)" m2-poss-whitespace-re "=>"))
+
+(defconst m2-object-re
+  (concat "\\(" m2-identifier-re "[ \t]+\\)?\\(BRANDED[ \t]+"
+	  "\\(\"[^\"]+\"\\)?[ \t]+\\)?OBJECT"))
+
+
+(defconst m2-part-starters
+  (concat
+   "\\bINTERFACE\\b\\|\\bMODULE\\b\\|\\bIMPORT\\b\\|\\bFROM\\b\\|"
+   "\\bTYPE\\b\\|\\bEXCEPTION\\b\\|\\bVAR\\b\\|"
+   "\\bPROCEDURE\\b\\|\\bREVEAL\\b\\|\\bCONST\\b")
+  "These are the patterns that can start lines and change the indentation
+of the following line.")
+
+
+(defconst m2-keyword-endable-ssl-introducers
+  (concat
+   "\\bTYPE\\b\\|\\bVAR\\b\\|"
+   "\\bRECORD\\b\\|\\bOBJECT\\b\\|\\bMETHODS\\b\\|\\bOVERRIDES\\b\\|"
+   "\\bBEGIN\\b\\|\\bTRY\\b\\|\\bEXCEPT\\b\\|"
+   m2-handler-start-re "\\|"
+   "\\bFINALLY\\b\\|\\bLOOP\\b\\|\\bTHEN\\b\\|\\bELSE\\b\\|\\bREPEAT\\b\\|"
+   "\\bDO\\b\\|\\bOF\\b\\|\\bREVEAL\\b\\|\\bCONST\\b"))
+
+;;; These keywords have the property that they affect the indentation if they
+;;; occur at the beginning of a line.
+(defconst m2-keyword-line-starters
+  (concat
+   "TYPE\\|\\bEND\\b\\|RECORD\\|PROCEDURE\\|OBJECT\\|METHODS\\|OVERRIDES\\|"
+   "VAR\\|BEGIN\\|TRY\\|EXCEPT\\b\\|"
+   m2-handler-start-re "\\|"
+   "|\\|FINALLY\\|LOOP\\|THEN\\|ELSIF\\|IF\\|ELSE\\|WHILE\\|REPEAT\\|"
+   "WITH\\|FOR\\b\\|DO\\|CASE\\|\\bOF\\b\\|TYPECASE\\|LOCK\\|CONST\\|FROM\\|"
+   "REVEAL"))
+
+
+
+
+(defconst m2-multi-keyword-line-prefix
+  (concat
+   "\\("
+   ;; ...a PROCEDURE at the start of a line that ends
+   ;; with an equals
+   "^PROCEDURE[^\n]*=" "\\|"
+   ;; ... or an IF or ELSEIF that ends with a THEN
+   "\\(IF\\|ELSIF\\)[^\n]*THEN" "\\|"
+   ;; ... or a WHILE, WITH, FOR, or LOCK that ends with a DO
+   "\\(WHILE\\|WITH\\|FOR\\b\\|LOCK\\)[^\n]*DO" "\\|"
+   ;; ... or a FOR that ends with a TO or BY
+   "FOR[^\n]*\\(DO\\|BY\\)" "\\|"		  
+   ;; ... or a CASE or TYPECASE that ends with a OF
+   "\\(CASE\\|TYPECASE\\)[^\n]*OF" "\\|"
+   ;; ... or at a handler-start that ends with a "=>"
+   "\\(|\\|\\)[ \t]*" m2-handler-start-re
+   "\\)"
+   ))
+
+(defconst m2-multi-keyword-lines
+  (concat m2-multi-keyword-line-prefix 
+	  "[ \t]*\\($\\|(\\*\\)"))
+
+
+(defconst m2-statement-starters
+  (concat
+   "BEGIN\\b\\|TRY\\b\\|LOOP\\b\\|IF\\b\\|WHILE\\b\\|REPEAT\\b\\|"
+   "WITH\\\b\\|FOR\\b\\|CASE\\b\\|TYPECASE\\b\\|LOCK\\b")
+  
+  "These are the patterns that can start lines and change the indentation
+of the following line.")
+
+
+
+(defconst m2-keyword-ssl-enders
+  "|\\|EXCEPT\\|FINALLY\\|ELSIF\\|ELSE\\|UNTIL\\|END")
+
+(defconst m2-left-parens
+  "\\((\\|\\[\\|{\\)")
+(defconst m2-right-parens
+  "\\()\\|\\]\\|}\\)")
+
+;;; Think of a more descriptive name for these...
+
+(defconst m2-statement-keywords
+  "RETURN\\|RAISE\\|EXCEPTION\\|IMPORT\\|WITH")
+
+
+;; Variables that control indentation behavior
+
+(defvar m2-standard-offset 2)
+(defvar m2-continued-line-offset 2)
+(defvar m2-case-offset 0)
+;;;(setq m2-case-offset 2)
+(defvar m2-open-paren-offset 4)
+;;;(setq m2-open-paren-offset 2)
+(defvar m2-assign-offset 4)
+(defvar m2-RAISES-offset 4)
+
+(defvar m2-follow-continued-indent t)
+
+(defvar m2-END-undent 2)
+(defvar m2-METHODS-undent 2)
+(defvar m2-OVERRIDES-undent 2)
+(defvar m2-EXCEPT-undent 2)
+(defvar m2-VERT-undent 2)
+(defvar m2-handler-start-undent 0)
+(defvar m2-EXCEPT-undent 2)
+(defvar m2-UNTIL-undent 2)
+(defvar m2-FINALLY-undent 2)
+(defvar m2-ELSIF-undent 2)
+(defvar m2-ELSE-undent 2)
+
+(defvar m2-DO-undent 1)
+(defvar m2-OF-undent 1)
+(defvar m2-THEN-undent 1)
+
+(defvar m2-OBJECT-undent 1)
+(defvar m2-RECORD-undent 1)
+
+
+
+(defun m2-after-keyword-adjust-indent (indent first-code part-start)
+  "Point is looking at a keyword at column INDENT; if the current line has
+any code it starts at FIRST-CODE.  Return the proper indentation for the
+current line."
+;;;  (message "m2-after-keyword: indent = %d" indent) (sit-for 2)
+  (let ((call-adjust-indent t))
+    (cond
+     ((looking-at "END")
+;;;    (message "m2-after-keyword(END): i: %d, m2-END: %d, m2-stand: %d"
+;;;	     indent m2-END-undent m2-standard-offset)
+;;;    (sit-for 2)
+      (setq indent (- (+ indent m2-END-undent) m2-standard-offset)))
+
+     ((looking-at "ELSE")
+      (setq indent (+ indent m2-ELSE-undent))
+      (if (m2-in-case part-start)
+	  (setq indent (+ indent m2-case-offset))))
+    
+
+     ((looking-at "METHODS")
+      (setq indent (+ indent m2-METHODS-undent)))
+     ((looking-at "OVERRIDES")
+      (setq indent (+ indent m2-OVERRIDES-undent)))
+     ((looking-at "EXCEPT\\b")
+;;;    (message "m2-after-keyword: EXCEPT" indent) (sit-for 2)
+      (setq indent (+ indent m2-EXCEPT-undent)))
+     ((looking-at "|")
+;;;    (message "m2-after-keyword: vert" indent) (sit-for 2)
+      (setq indent (+ indent m2-VERT-undent m2-case-offset)))
+     ((looking-at m2-handler-start-re)
+;;;      (message "m2-after-keyword: handler-start" indent) (sit-for 2)
+      (setq indent (+ indent m2-handler-start-undent m2-case-offset)))
+     ((looking-at "FINALLY")
+      (setq indent (+ indent m2-FINALLY-undent)))
+     ((looking-at "THEN")
+      (setq indent (+ indent m2-THEN-undent)))
+     ((looking-at "ELSIF")
+      (setq indent (+ indent m2-ELSIF-undent)))
+     ((looking-at "ELSE")
+      (setq indent (+ indent m2-ELSE-undent)))
+     ((looking-at "DO")
+      (setq indent (+ indent m2-DO-undent)))
+     ((looking-at "OF")
+      (setq indent (+ indent m2-OF-undent)))
+     ((looking-at m2-object-re)
+      (setq indent (+ indent m2-OBJECT-undent)))
+     ((looking-at "RECORD")
+      (setq indent (+ indent m2-RECORD-undent)))
+
+     ;; These are the keywords that can be followed by an SSL that begins on
+     ;; the same line -- if so, indent to the level of the first elem.
+     ((looking-at m2-same-line-ssl-keywords)
+;;;      (message "m2-after-keyword: same-line-ssl") (sit-for 2)
+      (let ((eol (save-excursion (end-of-line 1) (point))))
+	(save-excursion
+	  (forward-word 1)
+	  (m2-forward-to-code (point-max))
+;;;	  (message "m2-after-keyword: SlSSL(2)") (sit-for 2)
+	  (cond
+	   ((and
+	     m2-follow-continued-indent
+	     (<= (point) eol)
+	     (save-excursion
+	       (goto-char first-code)
+	       (not (looking-at (concat m2-part-starters "\\|BEGIN"))))
+	     (save-excursion
+	       (end-of-line 1)
+	       (m2-backward-to-code part-start)
+	       (looking-at ";")))
+;;;	    (message "m2-after-keyword: SLSSL (3)") (sit-for 2)
+	    (setq indent (current-column))
+	    (setq call-adjust-indent nil))
+	   (t
+	    (setq indent (+ indent m2-standard-offset)))))))
+
+     ;; These are all the keywords that don't affect the indentation
+     ;; when they start complete lines.
+     ((looking-at
+       (concat "INTERFACE\\|MODULE\\|IMPORT\\|FROM\\|EXCEPTION"))
+;;;    (message "m2-after-keyword: no extra") (sit-for 2)
+      indent)
+
+     ;; Otherwise, give the standard indentation.
+     (t
+;;;    (message "m2-after-keyword: standard") (sit-for 2)
+      (setq indent (+ indent m2-standard-offset))))
+	
+    (cond
+     (call-adjust-indent
+      (save-excursion
+	(goto-char first-code)
+;;;	(message "m2-after-keyword: calling complete-adjust") (sit-for 2)
+	(m2-complete-adjust-indent indent first-code part-start)))
+     (t
+;;;      (message "m2-after-keyword: not calling complete-adjust") (sit-for 2)
+      indent))))
+
+
+(defun m2-in-case (part-start)
+;;;  (message "M2-in-case") (sit-for 2)
+  (save-excursion
+    (let ((cur-point (point)))
+      (m2-backward-to-end-match part-start)
+;;;      (message "M2-in-case(2)") (sit-for 2)
+      (and
+       (looking-at m2-case-starters)
+       (progn
+	 (cond
+	  ((looking-at "TRY")
+	   ;; Is it a TRY-FINALLY or a TRY-EXCEPT?
+	   (let (res (continue t))
+	     (while continue
+	       (setq res (m2-re-search-forward "TRY\\|EXCEPT\\|FINALLY"
+					     cur-point t))
+	       (cond
+		((looking-at "EXCEPT")
+		 (setq continue nil))
+		((looking-at "TRY")
+		 ;; Go to matchine END and try again
+		 (m2-forward-to-end-matcher cur-point))
+		(t;; FINALLY or not found
+		 (setq res nil)
+		 (setq continue nil))))
+	     res))
+	  (t t)))
+       ;;; We are now looking at a case starter.  Make sure there is
+       ;;; at least one case arm starter.
+       (progn
+	 (cond
+	  ((looking-at "EXCEPT") (forward-word 1))
+	  ((looking-at "CASE\\|TYPECASE")
+	   (forward-word 1)
+	   (m2-re-search-forward "OF" cur-point 'move-to-limit)
+	   (forward-word 1)))
+	 (m2-forward-to-code cur-point)
+;;;	 (message "M2-in-case: about to test handler") (sit-for 2)
+	 (and (< (point) cur-point)
+	      (looking-at m2-handler-start-re)))
+
+;;;       (message "M2-in-case: returning t") (sit-for 2)
+       ))))
+
+	 
+(defun m2-in-continued-record-def (part-start)
+  (if (not (looking-at "END"))
+      (error "m2-in-continued-record-def assumes looking-at END"))
+  (save-excursion
+    (m2-backward-to-end-match part-start)
+    (let ((end-match (point)) (eol (save-excursion (end-of-line) (point))))
+      (beginning-of-line)
+      (or (save-excursion
+	    (re-search-forward "[ \t]*" eol t)
+	    (= (point) end-match))
+	  (save-excursion
+	    (and
+	     (re-search-forward "[ \t]*BRANDED[ \t]+" eol t)
+	     (= (point) end-match)
+	     (save-excursion
+	       (goto-char end-match)
+	       (looking-at "OBJECT"))))))))
+
+	 
+(defun m2-correct-for-trailing-ends (indent part-start)
+  ;; If the previous line ends in a (series of) END(s) that does
+  ;; (do) not start the line, and are unmatched by the start of the line,
+  ;; subtract the END-undent(s) from indent (the Eric Muller convention.)
+;;;  (message "correct-for-trailing-ends in: %d" indent) (sit-for 2)
+  (let ((prev-line-start
+	 (save-excursion
+	   (m2-backward-to-code part-start)
+	   (beginning-of-line)
+	   (m2-forward-to-code (point-max))
+;;;	   (message "correct-for-trailing-ends (0)") (sit-for 2)
+	   (point))))
+    (save-excursion
+      (if (save-excursion
+	    (m2-backward-to-code part-start)
+	    (beginning-of-line)
+	    (not (looking-at "[ \t]*END")))
+	  (save-excursion
+	    (let ((continue t))
+	      (while continue
+		(m2-backward-to-code part-start)
+;;;		(message "correct-for-trailing-ends (2)") (sit-for 2)
+		(cond
+		 ((or (and (> (point) 2)
+			   (progn
+			     (forward-char -2) (looking-at "END")))
+		      (and (> (point) 1)
+			   (progn
+			     (forward-char -1) (looking-at "END;"))))
+;;;		  (message "correct-for-trailing-ends (3)") (sit-for 2)
+		  (if (not (looking-at "END"))
+		      (error "m2-complete-adjust-indent(A)"))
+		  (let ((em-point
+			 (save-excursion
+			   (m2-backward-to-end-match part-start)
+;;;			   (message "correct-for-trailing-ends EM") (sit-for 2)
+			   (point))))
+;;;		    (message "xxx") (sit-for 2)
+		    (cond
+		      ((< em-point prev-line-start)
+		       (goto-char prev-line-start)
+;;;		       (message "xxx<") (sit-for 2)
+		       (setq indent
+			     (save-excursion (goto-char em-point)
+					     (current-column))))
+		      ((= em-point prev-line-start)
+;;;		       (message "xxx=") (sit-for 2)
+		       (setq indent (- indent m2-END-undent))
+		       (setq continue nil))
+		      ((> em-point prev-line-start)
+		       (goto-char em-point)))))
+		 (t
+		  (setq continue nil))))))))
+;;;    (message "m2-trailing-end returns %d" indent) (sit-for 2)
+    indent))
+     
+
+(defun m2-complete-adjust-indent (indent first-code part-start)
+  "Previous statement is complete and starts at column INDENT;
+if the current line has any code it starts at FIRST-CODE.  Returns the
+proper indentation for the current line."
+;;;  (message "m2-complete-adjust(A): indent = %d, first-code = %d"
+;;;	   indent first-code)
+;;;  (sit-for 2)
+  (save-excursion
+    (goto-char first-code)
+;;;    (message "m2-complete-adjust(B)") (sit-for 2)
+
+    ;; If the previous line ends in a (series of) END(s) that does
+    ;; (do) not start the line, and are unmatched before the start of the line,
+    ;; the END-undent(s) (the Eric Muller convention.)
+    (setq indent (m2-correct-for-trailing-ends indent part-start))
+		  
+;;;    (message "yyy2: indent = %d" indent) (sit-for 2)
+    (cond
+     ;; Some things can only start parts, and must be on the left margin.
+     ((looking-at (concat "TYPE\\b\\|REVEAL\\b\\|EXCEPTION\\b\\|"
+			  "FROM\\b\\|IMPORT\\b"))
+      0)
+      
+     ;; These can start parts, but can also appear in the procedures.
+     ((looking-at
+       (concat "\\(PROCEDURE\\b\\|CONST\\b\\|VAR\\b\\|BEGIN\\b\\)"))
+      ;; Look backwards for line-beginning-keywords that increase the
+      ;; indentation, start an SSL, but don't require an END (i.e.,
+      ;; TYPE, VAR, or CONST); or END's.  If the former is found first,
+      ;; decrease the indentation to the same as the keyword line's.
+      ;; If an END is found whose matcher is not something that can
+      ;; occur in a TYPE, VAR, or CONST (i.e. RECORD or OBJECT),
+      ;; indent normally.
+;;;      (message "yyy7") (sit-for 2)
+      (let ((new-indent indent) (continue t))
+	(while continue
+;;;	  (message "xxx1") (sit-for 2)
+	  (m2-re-search-backward
+	   (concat "\\(^[ \t]*\\(" m2-same-line-ssl-keywords "\\)\\|END\\|"
+		   m2-statement-starters "\\)")
+	   part-start 'move-to-limit)
+;;;	  (message "xxx2") (sit-for 2)
+	  (cond
+	   ;; If we reached the part-start because of the move-to-limit,
+	   ;; indent to here...
+	   ((looking-at (concat "^" m2-part-starters))
+;;;	    (message "xxx2.5") (sit-for 2)
+	    (goto-char first-code)
+	    ;; If its the start of a procedure def, indent normally.
+	    ;; Otherwise, indent to left margin.
+	    (if (not (m2-after-procedure-introducer part-start))
+		(setq new-indent 0))
+	    (setq continue nil))
+	      
+	   ((and
+	     (looking-at
+	      (concat "^[ \t]*\\(" m2-same-line-ssl-keywords "\\)"))
+	     (not (m2-in-arg-list part-start)))
+	    (setq continue nil)
+
+	    ;;; To accomodate part-starters that establish new indentations,
+	    ;;; indent to the level of the previous part-starter, unless
+	    ;;; that was a BEGIN.
+	    (goto-char first-code)
+	    (m2-re-search-backward
+	     (concat m2-part-starters "\\|BEGIN") part-start t)
+	    (while (m2-in-arg-list part-start)
+	      (m2-re-search-backward
+	       (concat m2-part-starters "\\|BEGIN") part-start t))
+;;;	    (message "xxx3") (sit-for 2)
+	    (cond
+	     ((looking-at "BEGIN")
+	      (setq new-indent (- new-indent m2-standard-offset)))
+	     (t
+	      (setq new-indent (current-column)))))
+	     
+	   ((looking-at
+	     (concat "END[ \t]*" m2-identifier-re "[ \t]*;"))
+	    (setq continue nil)
+	    (setq new-indent (- new-indent m2-standard-offset)))
+
+
+	   ((looking-at "END")
+	    (m2-backward-to-end-match part-start)
+;;;	    (message "xxxEND-match") (sit-for 2)
+	    (cond
+	     ((looking-at "\\(RECORD\\|OBJECT\\)")
+	      nil)
+	     (t
+	      (setq continue nil))))
+
+	   (t
+	    (setq continue nil))))
+	new-indent))
+
+     ;; If the current line is an END, add the END-undent.
+     ((looking-at "END")
+;;;      (message "zzz1") (sit-for 2)
+      (cond
+       ((m2-in-case part-start)
+	(- indent m2-END-undent m2-case-offset))
+       (t
+	(- indent m2-END-undent))))
+
+
+     ((looking-at "ELSE")
+      (- indent m2-ELSE-undent
+	 (if (m2-in-case part-start) m2-case-offset 0)))
+
+     ((looking-at "METHODS")
+      (- indent m2-METHODS-undent))
+     ((looking-at "OVERRIDES")
+      (- indent m2-OVERRIDES-undent))
+     ((looking-at "EXCEPT")
+      (- indent m2-EXCEPT-undent))
+     ((looking-at "UNTIL")
+      (- indent m2-UNTIL-undent))
+     ((looking-at "|")
+      (cond
+       ((save-excursion
+	  (m2-backward-to-code part-start)
+;;;	  (message "zzz2") (sit-for 2)
+	  (or
+	   (save-excursion
+	     (and (> (point) 1)
+		  (progn (forward-char -1) (looking-at "OF"))))
+	   (save-excursion
+	     (and (> (point) 5)
+		  (progn (forward-char -5) (looking-at "EXCEPT"))))))
+	(- indent m2-VERT-undent))
+       (t
+	(- indent m2-VERT-undent m2-case-offset))))
+
+     ((looking-at "FINALLY")
+      (- indent m2-FINALLY-undent))
+     ((looking-at "THEN")
+      (- indent m2-THEN-undent))
+     ((looking-at "ELSIF")
+      (- indent m2-ELSIF-undent))
+     ((looking-at "ELSE")
+      (- indent m2-ELSE-undent))
+     ((looking-at "DO")
+      (- indent m2-DO-undent))
+     ((looking-at "OF")
+      (- indent m2-OF-undent))
+     ((looking-at "RECORD")
+;;;      (message "zzz-record") (sit-for 2)
+      (- indent m2-RECORD-undent))
+     ((looking-at m2-object-re)
+;;;      (message "zzz-object") (sit-for 2)
+      (- indent m2-OBJECT-undent))
+     (t
+;;;      (message "zzz-t: indent = %d" indent) (sit-for 2)
+      indent))))
+  
+
+(defun m2-incomplete-indent (cur-point first-code part-start)
+  (let* (list-indent
+	 (prev-line-start
+	  (save-excursion
+	    (m2-backward-to-non-comment-line-start part-start)
+	    (point)))
+	 (last-char-prev-line
+	  (save-excursion
+	    (m2-backward-to-non-comment-line-start part-start)
+	    (end-of-line)
+	    (m2-backward-to-code
+	     (save-excursion (beginning-of-line) (point)))
+	    (point)))
+	 (prev-line-indent
+	  (save-excursion
+	    (m2-backward-to-non-comment-line-start part-start)
+	    (let ((pli (current-column)))
+	      (cond
+	       ((looking-at m2-statement-keywords)
+		(forward-word 1)
+		(m2-forward-to-code first-code)
+		(cond
+		 ((<= (point) last-char-prev-line)
+		  (current-column))
+		 (t pli)))
+	       (t pli))))))
+;;;    (message "m2-incomplete-indent(A)") (sit-for 2)
+    (cond
+     ;; Did the previous non-blank line end with a paren?
+     ((save-excursion
+	(goto-char last-char-prev-line)
+	(looking-at m2-left-parens))
+
+;;;      (message "m2-incomplete-indent(PAREN)") (sit-for 2)
+      ;;   Find the indentation of the previous line,
+      ;;     either add open-paren-offset, or indent of paren +
+      ;;     open-paren-sep
+      (goto-char last-char-prev-line)
+      (cond
+       (m2-open-paren-offset
+;;;	(message "m2-incomplete-indent(PAREN offset)") (sit-for 2)
+	(re-search-backward
+	 (concat m2-identifier-re m2-poss-whitespace-re)
+	 part-start t)
+	(goto-char (match-beginning 0))
+	;; Account for qualified names.
+	(cond
+	 ((save-excursion
+	    (and (> (point) 1)
+		 (progn
+		   (forward-char -1)
+		   (looking-at "\\."))))
+	  (re-search-backward
+	   (concat m2-identifier-re m2-poss-whitespace-re)
+	   part-start t)
+	  (goto-char (match-beginning 0))))
+
+;;;	(message "m2-incomplete-indent(PAREN offset 2)") (sit-for 2)
+	(+ (current-column) m2-open-paren-offset))
+       (t
+	(+ (current-column) m2-open-paren-sep))))
+		
+     ;; Did the previous line end with a ',' or ';'?:
+     ((save-excursion
+	(goto-char last-char-prev-line)
+	(looking-at ",\\|;"))
+
+;;;      (message "m2-incomplete-indent(COMMA)") (sit-for 2)
+      ;; Skip over any matched parens; if this puts us at a line
+      ;; containing an unmatched left paren, indent to that +
+      ;; paren-sep.  Otherwise, indent same as beginning of that line.
+      (save-excursion
+	(goto-char last-char-prev-line)
+	(let ((continue t) res)
+	  (while continue
+;;;	    (message "m2-incomplete-indent(COMMA) 0") (sit-for 2)
+	    (m2-re-search-backward
+	     (concat m2-left-parens "\\|" m2-right-parens)
+	     (save-excursion (beginning-of-line)
+			     (point)) 'move-to-limit)
+;;;	    (message "m2-incomplete-indent(COMMA) 1") (sit-for 2)
+	    (cond
+	     ((looking-at m2-left-parens)
+;;;	      (message "m2-incomplete-indent(COMMA) lp") (sit-for 2)
+	      (setq continue nil)
+	      (forward-char 1)
+	      (re-search-forward "[ \t]*") (goto-char (match-end 0))
+	      (setq list-indent (current-column)))
+	     ((looking-at m2-right-parens)
+;;;	      (message "m2-incomplete-indent(COMMA) rp") (sit-for 2)
+	      (forward-char 1)
+	      (backward-sexp 1))
+	     (t
+;;;	      (message "m2-incomplete-indent(COMMA) none") (sit-for 2)
+	      (beginning-of-line)
+	      (m2-forward-to-code last-char-prev-line)
+	      (setq continue nil)
+	      (setq list-indent (current-column)))))
+;;;	  (message "m2-incomplete-indent(COMMA) end") (sit-for 2)
+	  (cond
+	   ((looking-at (concat "|[ \t]*" m2-identifier-char-re))
+	    (forward-word 1) (forward-word -1)
+	    (setq list-indent (current-column)))
+	   ((looking-at m2-statement-keywords)
+	    (forward-word 1)
+	    (re-search-forward "[ \t]*" last-char-prev-line t)
+	    (setq list-indent (current-column))))))
+      list-indent)
+	      
+     ;; Did the previous non-blank line end a procedure header?
+     ((m2-after-procedure-introducer part-start)
+;;;      (message "m2-incomplete-indent(PROCEDURE)") (sit-for 2)
+      (goto-char last-char-prev-line)
+      (m2-re-search-backward "PROCEDURE" part-start t)
+      (+ (current-column) m2-standard-offset))
+
+     ;; Does the current line start a RAISES clause?
+     ((looking-at "^[ \t]*RAISES")
+;;;      (message "m2-incomplete-indent(RAISES)") (sit-for 2)
+      (goto-char last-char-prev-line)
+      (m2-re-search-backward "PROCEDURE" part-start t)
+      (+ (current-column) m2-RAISES-offset))
+
+     ;; Did the previous line end with an assignment?
+     ((save-excursion
+	(goto-char last-char-prev-line)
+	(beginning-of-line)
+;;;	(message "m2-incomplete-indent(:= 1)") (sit-for 2)
+	(and (m2-re-search-forward ":=" (1+ last-char-prev-line) t)
+	     (re-search-forward "[^ \t]" last-char-prev-line t)))
+;;;      (message "m2-incomplete-indent(:=)") (sit-for 2)
+      (goto-char last-char-prev-line)
+      (beginning-of-line)
+      (m2-re-search-forward ":=" last-char-prev-line t)
+      (forward-char 2)
+      (re-search-forward "[ \t]*[^ \t]")
+      (+ (- (current-column) 1) m2-assign-offset))
+
+     ;; Otherwise:
+     (t
+;;;      (message "m2-incomplete-indent(OTHER)") (sit-for 2)
+      ;; Find out if the previous line begins the statement.
+      (goto-char prev-line-start)
+      (m2-re-search-backward
+       (concat ";\\|" m2-keyword-line-starters "\\|" m2-part-starters
+	       "\\|" m2-statement-keywords)
+       part-start t)
+      (while (m2-in-arg-list part-start)
+	(m2-re-search-backward
+	 (concat ";\\|" m2-keyword-line-starters "\\|" m2-part-starters
+		 "\\|" m2-statement-keywords)
+	 part-start t))
+;;;      (message "m2-incomplete-indent(OTHER1)") (sit-for 2)
+      (if (or (> (point) part-start)
+	      (and (= (point) part-start)
+		   (looking-at m2-keyword-endable-ssl-introducers)))
+	  (progn
+	    (re-search-forward
+	     (concat ";\\|" m2-keyword-line-starters "\\|" m2-part-starters
+		     "\\|" m2-statement-keywords)
+	     cur-point t)
+	    (goto-char (match-end 0))))
+;;;      (message "m2-incomplete-indent(OTHER1.5)") (sit-for 2)
+      (m2-forward-to-code (point-max))
+;;;      (message "m2-incomplete-indent(OTHER2), prev-line-start = %d"
+;;;	       prev-line-start)
+;;;      (sit-for 2)
+      (cond
+       ;; If the previous line begins the statement, add
+       ;; m2-standard-offset to indentation, unless the prev-line-indent
+       ;; has already skipped over a keyword.
+       ((= (point) prev-line-start)
+;;;	(message "m2-incomplete-indent(START): prev-line-indent = %d"
+;;;		 prev-line-indent)
+;;;	(sit-for 2)
+	(m2-complete-adjust-indent
+	 ;; Indent further if we haven't indented already.
+	 (cond
+	  ((= prev-line-indent
+	      (save-excursion (goto-char prev-line-start) (current-column)))
+	   (+ prev-line-indent m2-continued-line-offset))
+	  (t prev-line-indent))
+	 first-code part-start))
+       (t
+;;;	(message "m2-incomplete-indent(CONT)") (sit-for 2)
+	;; Otherwise, same indentation as previous, modulo adjustment
+	;; for current line
+	prev-line-indent))))))
+
+
+(defun m2-after-procedure-introducer (part-start)
+  "Returns t iff first non-blank non-comment character before point is the '='
+of a procedure definition."
+  (save-excursion
+    (m2-backward-to-code part-start)
+    (and
+     (looking-at "=")
+;;;     (message "m2-API(0)") (sit-for 2)
+     (let ((eq-point (point)))
+       (and
+	;; Not that this does not allow any comments in
+	;;   PROCEDURE Foo <left-paren>
+	;; and all must occur on the same line.
+	(m2-re-search-backward
+	 (concat "PROCEDURE[ \t]*" m2-identifier-re "[ \t]*(")
+	 part-start t)
+;;;	(message "m2-API(1)") (sit-for 2)
+	(progn
+	  (re-search-forward
+	   (concat "PROCEDURE[ \t]*" m2-identifier-re "[ \t]*(")
+	   eq-point t)
+	  (goto-char (match-end 0))
+;;;	  (message "m2-API(2)") (sit-for 2)
+	  (forward-char -1)
+	  (and
+	   (condition-case err
+	       (progn (forward-sexp 1) t)
+	     (error nil))
+;;;	   (message "m2-API(3)") (sit-for 2)
+	   ;; We should now be at the right paren of the arg-list.
+	   ;; Check for a return type.
+	   (progn
+	     (m2-forward-to-code eq-point)
+	     (and
+;;;	      (message "m2-API(4)") (sit-for 2)
+	      (cond
+	       ((looking-at ":")
+		(forward-char 1)
+		(m2-forward-to-code eq-point)
+		(and
+		 (looking-at m2-poss-qual-ident-re)
+		 (progn
+		   (re-search-forward m2-poss-qual-ident-re eq-point t)
+		   (goto-char (match-end 0))
+		   (m2-forward-to-code eq-point)
+		   t)))
+	       (t t))
+	      ;; Now check for RAISES clause.
+;;;	      (message "m2-API(5)") (sit-for 2)
+	      (cond
+	       ((looking-at "RAISES")
+		(forward-word 1)
+		(m2-forward-to-code eq-point)
+		(cond
+		 ((looking-at "ANY")
+		  (forward-word 1)
+		  (m2-forward-to-code eq-point)
+		  t)
+		 ((looking-at "{")
+;;;		  (message "m2-API(5.5)") (sit-for 2)
+		  (and
+		   (condition-case err
+		       (progn (forward-sexp 1) t)
+		     (error nil))
+		   (progn (m2-forward-to-code eq-point) t)))
+		 (t t)))
+	       (t t))
+
+	      ;; Now, we better be back to the original =!
+	      (= (point) eq-point))))))))))
+
+
+(defconst m2-end-matchers
+  (concat
+   "\\bRECORD\\b\\|\\bOBJECT\\b\\|\\bBEGIN\\b\\|\\bTRY\\b\\|\\bLOOP\\b\\|"
+   "\\bIF\\b\\|\\bWHILE\\b\\|\\bWITH\\b\\|\\bFOR\\b\\|\\bCASE\\b\\|"
+   "\\bTYPECASE\\b\\|\\bLOCK\\b\\|\\bINTERFACE\\b\\|\\bMODULE\\b\\|"
+   "\\bGENERIC\\b"))
+
+
+(defconst m2-same-line-ssl-keywords
+  "\\bVAR\\b\\|\\bTYPE\\b\\|\\bCONST\\b\\|\\bEXCEPTION\\b\\|\\bREVEAL\\b"
+  "These are the keywords that can be followed by an SSL that begins on
+the same line -- if so, indent to the level of the first elem.")
+
+(defconst m2-case-starters
+  "TRY\\|CASE\\|TYPECASE")
+
+
+
+(defun m2-backward-to-end-match (part-start &optional depth)
+  (if (not depth) (setq depth 0))
+  (let (res (continue t))
+    (while continue
+;;;      (message "m2-backward-to-end-match(1) [%d]" depth) (sit-for 1)
+      (setq res (m2-re-search-backward
+		 (concat "\\(" m2-end-matchers "\\|END\\)") part-start t))
+      (cond
+       ((and res (looking-at "END"))
+	(m2-backward-to-end-match part-start (1+ depth)))
+       (t
+	(setq continue nil))))
+    res))
+
+(defun m2-forward-to-end-matcher (max-point)
+  (let (res (continue t))
+    (while continue
+      (setq res (m2-re-search-forward
+		 (concat "\\(" m2-statement-starters "\\|END\\)") max-point t))
+      (cond
+       ((looking-at m2-statement-starters)
+	(re-search-forward m2-statement-starters max-point t)
+	(goto-char (match-end 0))
+	(m2-forward-to-end-matcher max-point))
+       (t   ;; looking at END or reached max-point
+	(setq continue nil))))
+    res))
+
+
+(defun m2-backward-to-non-comment-line-start (part-start)
+  "Sets the point at the first non-whitespace character in a line that
+contains something other than comments and/or whitespace."
+  (m2-backward-to-code part-start)
+  (beginning-of-line)
+  (m2-skip-whitespace-in-line))
+
+
+(defun m2-skip-whitespace-in-line ()
+  (re-search-forward "[ \t]*"))
+
+
+(defun m2-indent-to (cur-point new-column)
+  "Make current line indentation NEW-COLUMN.  If the point is to the
+left of the first non-blank character, move it to NEW-COLUMN.
+Otherwise, maintain its relative position.  Has the side effect
+of converting tabs to spaces."
+  (goto-char cur-point)
+  (untabify (save-excursion (beginning-of-line) (point))
+	    (save-excursion (end-of-line) (point)))
+  (let ((cur-column (current-column))
+	(cur-point (point))
+	(first-column
+	 (save-excursion
+	   (beginning-of-line)
+	   (re-search-forward " *")
+	   (current-column))))
+    (let ((diff (- new-column first-column)))
+      (cond
+       ((> diff 0)
+	(beginning-of-line)
+	;; Must do this to make sure the keyword completion marker moves
+	;; correctly.
+	(let ((d diff))
+	  (while (> d 0)
+	    (insert-before-markers " ") (setq d (1- d))))
+	)
+       ((< diff 0)
+	(save-excursion
+	  (forward-char (- first-column cur-column))
+	  (backward-delete-char-untabify (- diff)))))
+      (cond
+       ((> first-column cur-column)
+	(beginning-of-line)
+	(forward-char new-column))
+       (t
+	(goto-char (+ cur-point diff)))))))
+
+
+(defun m2-in-comment-or-string ()
+  "Returns 'string if point is in an unterminated string, 'comment if in
+an unterminated comment, otherwise, nil."
+  (save-excursion
+    (beginning-of-line)
+    (let ((cur-point (point))
+	  (state nil))
+      (save-excursion
+	;; We assume the lisp-like convention that "top-level defuns,"
+	;; or "parts", are the only things that occur on the left
+	;; margin (we make an exception for end-comments.)
+	(m2-backward-to-last-part-begin)
+	(while (and (not state)
+		    (re-search-forward
+		     (concat "\\(" m2-com-start-re "\\|\"\\)")
+		     cur-point t))
+	  (goto-char (match-beginning 0))
+	  (cond
+	   ((looking-at m2-com-start-re)
+	    (setq state 'comment)
+	    (if (m2-skip-comment-forward cur-point t) (setq state nil)))
+	   ((looking-at "\"\\|'")
+	    (setq state 'string)
+	    (if (re-search-forward "[^\\\\]\\(\"\\|'\\)" cur-point t)
+		(setq state nil)))))
+	state))))
+
+(defun m2-backward-to-last-part-begin ()
+  (beginning-of-line nil)
+  (if (re-search-backward
+       (concat "^\\(" m2-com-start-re "\\|" m2-part-starters "\\)")
+       (point-min) t)
+      (progn
+	(goto-char (match-beginning 0)))
+    (goto-char (point-min))))
+
+(defun m2-forward-to-code (max-point)
+  "Sets the point at the first non-comment, non-whitespace character
+following the current point, else at max-point."
+;;;  (message "m2-forward-to-code (1)") (sit-for 2)
+  (let ((continue t))
+    (while continue
+;;;      (message "m2-forward-to-code (1.5)") (sit-for 2)
+      (setq continue
+	    (and (re-search-forward "[^ \t\n]" max-point 'move-to-limit)
+		 (progn (goto-char (match-beginning 0))
+;;;			(message "m2-forward-to-code (2)") (sit-for 2)
+			(and (looking-at m2-com-start-re)
+			     (m2-skip-comment-forward max-point t))))))))
+
+
+(defun m2-backward-to-code (min-point)
+  "Sets the point at the first non-comment, non-whitespace character
+before the current point, else at end-of-file"
+  (interactive "n")
+  (let ((continue t))
+    (while continue
+      (if (re-search-backward "[^ \t\n][ \t\n]*" min-point t)
+	  (goto-char (match-beginning 0)))
+      (setq continue (and (save-excursion
+			    (and (> (point) 1)
+				 (progn
+				   (forward-char -1)
+				   (looking-at m2-com-end-re))))
+			  (progn
+			    (forward-char 1)
+			    (m2-skip-comment-backward min-point t)))))
+
+    t))
+
+(defun m2-re-search-forward (re max-point fail)
+  "Assumes we're not in a comment.  Puts point at the start of the
+first occurence of RE that is not in a comment, if such an occurence
+occurs before MAX-POINT, and returns non-nil.  Otherwise, returns nil
+and leaves point unaffected.  Results are undefined if RE matches any
+comment starter."
+  (let ((continue t)
+	(save-point (point))
+	(res nil))
+    (while continue
+      (setq res (re-search-forward
+		  (concat "\\(" m2-com-start-re "\\|" re "\\)")
+		  max-point fail))
+      (goto-char (match-beginning 0))
+      (cond
+       (res
+	(cond
+	 ((looking-at m2-com-start-re)
+	  (m2-skip-comment-forward max-point fail))
+	 (t
+	  (setq continue nil))))
+       (t
+	(setq continue nil)
+	(if (and (eq fail t) (not res))
+	    (goto-char save-point)))))
+    res))
+	
+
+(defun m2-re-search-backward (re min-point fail)
+  "Assumes we're not in a comment.  Puts point the start of the
+first previous occurence of RE that is not in a comment, if such an occurence
+occurs before MIN-POINT, and returns non-nil.  FAIL is interpreted as is third
+argument to re-search.  Results are undefined if RE matches any comment
+starter." 
+  (let ((continue t)
+	(save-point (point))
+	(res nil))
+    (while continue
+      (setq res (re-search-backward
+		 (concat "\\(" m2-com-end-re "\\|" re "\\)") min-point fail))
+      (cond
+       (res
+	(cond
+	 ((looking-at m2-com-end-re)
+	  (forward-char 2)
+	  (m2-skip-comment-backward min-point fail))
+	 (t
+	  (setq continue nil))))
+       (t
+	(setq continue nil)
+	(if (and (eq fail t) (not res))
+	    (goto-char save-point)))))
+    res))
+
+(defun m2-skip-comment-forward (max-point fail)
+  "Requires that point is at the start of a comment.  If that comment
+is terminated before MAX-POINT, return t and leaves point after end of
+the comment.  Otherwise, if fail is 't, returns returns nil and leaves
+the point unchanged; if fail is nil raises an errer; if fail is not t or nil,
+returns nil and leaves the point at max-point or (point-max), whichever is
+smaller."
+  (if (not (looking-at m2-com-start-re))
+      (error
+       "m2-skip-comment-forward should only be called when looking at
+comment-starter"))
+  (forward-char 2)
+  (let ((save-point (point)) (continue t) res)
+    (while continue
+;;;      (message "m2-comment-forward (0.5)") (sit-for 2)
+      (setq res (re-search-forward m2-com-start-or-end-re max-point fail))
+      (cond
+       (res
+;;;	(message "m2-comment-forward (1)") (sit-for 2)
+	(goto-char (match-beginning 0))
+;;;	(message "m2-comment-forward (2)") (sit-for 2)
+	(cond
+	 ((looking-at m2-com-start-re)
+	  (if (not (m2-skip-comment-forward max-point fail))
+	      (progn (setq res nil)
+		     (setq continue nil))))
+	 ((looking-at m2-com-end-re)
+	  (goto-char (match-end 0))
+	  (setq continue nil))
+	 (t
+;;;	  (message "m2-comment-forward (4)") (sit-for 2)
+	  (goto-char save-point)
+	  (setq res nil)
+	  (setq continue nil))))
+       (t 
+;;;	(message "m2-comment-forward (5)") (sit-for 2)
+	(goto-char save-point)
+	(setq res nil)
+	(setq continue nil))))
+    res))
+
+
+(defun m2-skip-comment-backward (min-point fail)
+  "Requires that point is at the end of a comment.  If that comment
+is terminated before MIN-POINT, return t and leaves point at the start
+the comment.  Otherwise returns nil and leaves the point in an
+unspecified position."
+  (forward-char -2)
+  (if (not (looking-at m2-com-end-re))
+      (error
+       "m2-skip-comment-backward should only be called when looking at
+comment-ender"))
+  (let ((save-point (point)) (continue t) res)
+    (while continue
+      (setq res (re-search-backward m2-com-start-or-end-re min-point fail))
+      (cond
+       (res
+	(cond
+	 ((looking-at m2-com-end-re)
+	  (forward-char 2)
+	  (if (not (m2-skip-comment-backward min-point fail))
+	      (progn
+		(setq res nil)
+		(setq continue nil))))
+	 ((looking-at m2-com-start-re)
+	  (setq continue nil))
+	 (t
+	  (goto-char save-point)
+	  (setq res nil)
+	  (setq continue nil))))
+       (t
+	(goto-char save-point)
+	(setq res nil)
+	(setq continue nil))))
+    res))
+     
+;;;======================================================================
+;;; Electric END completion
+
+(defun m2-do-electric-end ()
+;;;  (message "m2-do-electric-end") (sit-for 2)
+  (let ((case-fold-search nil))
+    (cond
+     ((and (save-excursion
+	     (beginning-of-line)
+	     (looking-at "^[ \t]*END[ \t]*$"))
+	   (or m2-electric-end m2-blink-end-matchers))
+      (let ((insert-point
+	     (save-excursion (beginning-of-line) (forward-word 1) (point)))
+	    (insert-string))
+;;;	(progn (message "m2-do-electric-end 2") (sit-for 2) t)
+	(save-excursion
+	  (beginning-of-line)
+	  (and
+	   (m2-backward-to-end-match (point-min))
+	   (if m2-blink-end-matchers (sit-for 1) t)
+;;;	   (progn (message "m2-do-electric-end 3") (sit-for 1) t)
+	   (progn
+	     (cond
+	      ;; Do nothing if we're not supposed to...
+	      ((not m2-electric-end))
+	      ;; If it's a begin, what is it the begin of?
+	      ((looking-at "BEGIN")
+	       (cond
+		;; If it's on the left margin, it must be a module.
+		((looking-at "^BEGIN")
+		 (goto-char (point-min))
+		 (and
+		  (re-search-forward "MODULE\\|INTERFACE" (point-max) t)
+		  (progn
+		    (goto-char (match-end 0))
+		    (forward-word 1)
+		    (setq insert-string
+			  (concat
+			   (buffer-substring
+			    (save-excursion (forward-word -1) (point))
+			    (point))
+			   ".")))))
+		;; Is it the body of a procedure?
+		((and
+;;;		(progn (message "m2-do-electric-end PROC 1") (sit-for 2) t)
+		  (m2-re-search-backward "BEGIN\\|PROCEDURE" (point-min) t)
+		  (looking-at "PROCEDURE"))
+;;;	       (progn (message "m2-do-electric-end PROC 2") (sit-for 2) t)
+		 (forward-word 2)
+		 (setq insert-string
+		       (concat
+			(buffer-substring
+			 (save-excursion (forward-word -1) (point))
+			 (point))
+			";")))
+		;; Otherwise, it is just a random BEGIN, so
+		;; m2-electric-end must be 'all.
+		((eq m2-electric-end 'all)
+		 (setq insert-string "(* BEGIN *)"))))
+
+	      ((looking-at "INTERFACE\\|MODULE")
+	       (forward-word 2)
+	       (setq insert-string
+		     (concat
+		      (buffer-substring
+		       (save-excursion (forward-word -1) (point))
+		       (point))
+		      ".")))
+
+	      ;; Otherwise, m2-electric-end must be 'all.
+	      ((eq m2-electric-end 'all)
+;;;	       (progn (message "m2-do-electric-end non-BEGIN") (sit-for 2) t)
+	       (setq insert-string
+		     (concat "(* "
+			     (buffer-substring
+			      (point)
+			      (save-excursion (forward-word 1) (point)))
+			     " *)")))))))
+
+	(and
+	 insert-string
+	 (progn
+	   (goto-char insert-point)
+	   ;; If we completed an END and then added something, include
+	   ;; the something in the completion...
+	   (if (and (marker-position m2-cur-keyword-completion-start)
+		    (= insert-point
+		       (+ m2-cur-keyword-completion-start
+			  m2-cur-keyword-completion-len)))
+	       (setq m2-cur-keyword-completion-len
+		     (+ m2-cur-keyword-completion-len 1
+			(length insert-string))))
+	   (insert " " insert-string))))))))
+
+		
+
+;;; modula2.el ends here

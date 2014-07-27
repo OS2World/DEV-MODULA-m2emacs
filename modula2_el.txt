@@ -1,0 +1,79 @@
+Modula2.el is a Modula-2 editing support package
+
+
+Authors: Michael Schmidt <michael@pbinfo.UUCP> 
+         Tom Perrine     <Perrin@LOGICON.ARPA>
+         Egor Ziryanov   <ego@iis.nsk.su>
+
+The authors distributed this without a copyright notice
+back in 1988, so it is in the public domain.  The original included
+the following credit:
+
+Author Mick Jordan
+amended Peter Robinson
+
+
+Commentary:
+
+A major mode for editing Modula-2 code.  It provides convenient abbrevs
+for Modula-2 keywords, knows about the standard layout rules, makes syntax
+highlighting, fine indentation and supports a native compile command.
+
+
+How to install it into ~/.emacs:
+
+(or (assoc "\\.ob2$" auto-mode-alist)                                     
+    (setq auto-mode-alist (cons '("\\.ob2$" . modula-2-mode)
+				auto-mode-alist)))                           
+
+(or (assoc "\\.mod$" auto-mode-alist)                                     
+    (setq auto-mode-alist (cons '("\\.mod$" . modula-2-mode)
+				auto-mode-alist)))
+
+(or (assoc "\\.def$" auto-mode-alist)                                     
+    (setq auto-mode-alist (cons '("\\.def$" . modula-2-mode)
+				auto-mode-alist)))                           
+
+To automaticaly fontify, syncroneously Modula-2 file loading you
+have to add following into ~/.emacs
+
+(defun m2-mode-fontify-hook () "set Modula2 font lock and fontify buffer"
+  (interactive)
+  (font-lock-mode)
+  (font-lock-fontify-buffer)
+  (define-key m2-mode-map [delete] 'delete-char)
+  (define-key m2-mode-map [return] 'newline-and-indent))
+
+(add-hook 'm2-mode-hook  'm2-mode-fontify-hook)
+
+
+Keymap used in Modula-2 mode:
+
+Ctrl-C b - Insert a BEGIN keyword and indent for the next line.
+Ctrl-C c - Build skeleton CASE statment, prompting for the <expression>.
+Ctrl-C d - Build skeleton DEFINITION MODULE, prompting for the <module name>.
+Ctrl-C e - Insert ELSE keyword and indent for next line.
+Ctrl-C f - Build skeleton FOR loop statment, prompting for the loop parameters.
+Ctrl-C h - Insert a comment block containing the module title, author, etc.
+Ctrl-C i - Insert skeleton IF statment, prompting for <boolean-expression>.
+Ctrl-C l - Build skeleton LOOP (with END).
+Ctrl-C m - Build skeleton IMPLEMENTATION MODULE, prompting for <module-name>.
+Ctrl-C o - Insert OR operand and indent line.
+Ctrl-C p - Build skeleton PROCEDURE, prompting <arguments> and <result-type>.
+Ctrl-C r - Build skeleton RECORD (with END), prompting <record-name>.
+Ctrl-C t - Insert TYPE statement and indent for next line.
+Ctrl-C u - Build skeleton REPEAT - UNTIL, prompting <boolean-experession>.
+Ctrl-C v - Insert VAR statement and indent for next line.
+Ctrl-C w - Build skeleton WHILE (with END), prompting <boolean-experession>.
+Ctrl-C x - Insert EXPORT QUALIFIED statements.
+Ctrl-C y - Insert FROM IMPORT skeleton, prompting <module-name>.
+Ctrl-C { - Insert the beginning of the comments.
+Ctrl-C } - Insert the ending of the comments.
+Ctrl-C Ctrl-W - Build skeleton WITH (with END), prompting <record-type>.
+Ctrl-C Ctrl-Z - Suspend emacs (bail out to shell) under X no sense.
+Ctrl-C Ctrl-V - Make a visit to prompting module using redirections (require
+                m2whereis program for redirection search).
+Ctrl-C Ctrl-T - Toggle between .mod and .def files for the module.
+Ctrl-C Ctrl-B - Build a project by prompting name.
+Ctrl-C Ctrl-C - Compile a module.
+
